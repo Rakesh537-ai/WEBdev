@@ -1,0 +1,104 @@
+# -------------------------------
+# 0️⃣ Imports
+# -------------------------------
+import io
+import pandas as pd
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve, accuracy_score
+import matplotlib.pyplot as plt
+from google.colab import files
+
+# -------------------------------
+# 1️⃣ Upload single files
+# -------------------------------
+print("📂 Upload TrainA (.psv) file for testing")
+uploadedA = files.upload()
+
+print("📂 Upload TrainB (.psv) file for testing")
+uploadedB = files.upload()
+
+# Read uploaded files (pipe-separated)
+dfA = pd.read_csv(io.BytesIO(list(uploadedA.values())[0]), sep='|')
+dfB = pd.read_csv(io.BytesIO(list(uploadedB.values())[0]), sep='|')
+
+print("✅ Files uploaded successfully!")
+print("TrainA shape:", dfA.shape)
+print("TrainB shape:", dfB.shape)
+
+# -------------------------------
+# 2️⃣ Preprocessing (single file each)
+# -------------------------------
+# Strip column names
+dfA.columns = dfA.columns.str.strip()
+dfB.columns = dfB.columns.str.strip()
+
+# Define target
+target_col = 'SepsisLabel'
+
+# Combine dataframes for consistent preprocessing
+combined_df = pd.concat([dfA.drop(columns=[target_col]), dfB.drop(columns=[target_col])], ignore_index=True)
+
+# Drop columns with >85% missing
+threshold = 0.85
+cols_to_drop = combined_df.columns[combined_df.isnull().mean() > threshold]
+dfA = dfA.drop(columns=cols_to_drop)
+dfB = dfB.drop(columns=cols_to_drop)
+
+# Separate features and target again after dropping columns
+X_A = dfA.drop(columns=[target_col])
+y_A = dfA[target_col]
+
+X_B = dfB.drop(columns=[target_col])
+y_B = dfB[target_col]
+
+# Impute missing values (median)
+imputer = SimpleImputer(strategy='median')
+# Fit imputer on combined data to ensure consistent columns
+imputer.fit(pd.concat([X_A, X_B], ignore_index=True))
+X_A_imputed = pd.DataFrame(imputer.transform(X_A), columns=X_A.columns)
+X_B_imputed = pd.DataFrame(imputer.transform(X_B), columns=X_B.columns)
+
+
+# Scale features
+scaler = StandardScaler()
+# Fit scaler on combined data to ensure consistent columns
+scaler.fit(pd.concat([X_A_imputed, X_B_imputed], ignore_index=True))
+X_A_scaled = pd.DataFrame(scaler.transform(X_A_imputed), columns=X_A_imputed.columns)
+X_B_scaled = pd.DataFrame(scaler.transform(X_B_imputed), columns=X_B_imputed.columns)
+
+
+# -------------------------------
+# 3️⃣ Train-test split (using TrainA only)
+# -------------------------------
+X_train, X_test, y_train, y_test = train_test_split(
+    X_A_scaled, y_A, test_size=0.2, random_state=42
+)
+
+# -------------------------------
+# 4️⃣ Class weights (based on TrainA)
+# -------------------------------
+class_weights_A = {0: 0.5110829552995231, 1: 23.05716036414566}
+
+# -------------------------------
+# 5️⃣ Train Random Forest
+# -------------------------------
+rf = RandomForestClassifier(
+    n_estimators=200,
+    max_depth=10,
+    class_weight=class_weights_A,
+    random_state=42,
+    n_jobs=-1
+)
+rf.fit(X_train, y_train)
+
+# -------------------------------
+# 6️⃣ Evaluate
+# -------------------------------
+# Evaluate on X_B_scaled and y_B as X_test and y_test are imbalanced
+y_pred = rf.predict(X_B_scaled)
+
+accuracy = accuracy_score(y_pred , y_B)
+print("Accuracy:", accuracy)
